@@ -1,0 +1,372 @@
+import pandas as pd
+import numpy as np
+import dash
+from dash import dcc
+from dash import html
+import dash_bootstrap_components as dbc
+import plotly.graph_objs as go
+import plotly.express as px
+from dash.dependencies import Input,Output
+from dash import callback_context
+from dash import dash_table
+from dash_extensions import Download
+from dash.exceptions import PreventUpdate
+from dash_bootstrap_templates import load_figure_template
+from datetime import date
+
+
+#Read in the data
+
+asa = pd.read_csv('ASA.csv')
+snps = pd.read_csv('sNPS.csv')
+complaints = pd.read_csv('complaints.csv')
+ltb = pd.read_csv('ltb.csv')
+att = pd.read_csv('att.csv')
+reset = pd.read_csv('reset.csv')
+rnps = pd.read_csv('NPStimeseries.csv', index_col = 'ID', parse_dates = True)
+
+asamarket = pd.read_csv('ASAmarket.csv')
+attmarket = pd.read_csv('att2.csv')
+ltbmarket = pd.read_csv('ltbmarket.csv')
+complaintsmarket = pd.read_csv('complaintsmarket.csv')
+
+#Set the style sheets and colours
+
+external_stylesheets = [dbc.themes.COSMO]
+colorsequence = ['#DB0011','#9FA1A4','#000000','#f2c0c4','#4D4D4D']
+load_figure_template("COSMO")
+
+
+###################Build the content for the app##################
+
+#Cards
+
+card_content1 = [dbc.CardBody([
+                    html.H5('Interaction Metrics', className = 'card-title'),
+                    html.P('What happens during customer experiences', className = 'card-text')])]
+card_content2 = [dbc.CardBody([
+                    html.H5('Perception Metrics', className = 'card-title'),
+                    html.P('What cutomers feel about their experiences', className = 'card-text')])]
+card_content3 = [dbc.CardBody(
+                    [html.H5('Outcome Metrics', className = 'card-text'),
+                    html.P('What customers do as a result of their experience', className = 'card-text')]
+                )]
+
+###################Data prepartion##################
+#rNPS graph trend
+
+rnps = rnps.sort_values('Survey date', ascending = True)
+
+conditions = [
+    (rnps['NPS'] <= 6),
+    ((rnps['NPS'] >6 )& (rnps['NPS'] < 9)),
+    (rnps['NPS'] >= 9)
+]
+
+values = ['Detractor', 'Passive', 'Promoter']
+
+rnps['NPS category'] = np.select(conditions, values)
+rnpsfig = rnps.groupby(['Quarter','NPS category'])['Market'].count()
+rnpsfig = rnpsfig.reset_index()
+rnpsfig = rnpsfig.pivot(index = 'Quarter', columns = 'NPS category')
+rnpsfig.columns = rnpsfig.columns.droplevel(0)
+rnpsfig['Total'] = rnpsfig.sum(axis = 1)
+rnpsfig['NPS score'] = (rnpsfig['Promoter']/rnpsfig['Total'] - rnpsfig['Detractor']/rnpsfig['Total'])*100
+rnpsfig = rnpsfig.rename(index = {1:'Q121', 2:'Q221', 3:'Q321', 4:'Q421',5:'May-21',6:'Jun-21',7:'Jul-21',8:'Aug-21',9:'Sep-21',10:'Oct-21',11:'Nov-21',12:'Dec-21'})
+rnpsfig = rnpsfig['NPS score']
+
+#rNPS graph data prep market Snapshot
+
+
+
+###################Static Graphs##################
+fig4 = go.Figure()
+fig4.add_trace(go.Scatter(x = ltb['Date'], y = ltb['Premier'], name = 'Premier', marker = {'color':'grey'}))
+fig4.add_trace(go.Scatter(x = ltb['Date'], y = ltb['Personal Banking'], name = 'Personal Banking', marker = {'color':'black'}))
+fig4.update_layout(yaxis_title = '', xaxis_title = '', title = 'Customer attrition', legend = dict(orientation = 'h', y = -0.2))
+fig4.update_yaxes(showline = True, linecolor = 'grey')
+fig4.update_xaxes(showline = True, linecolor = 'grey')
+fig4.update_xaxes(tickangle=0)
+
+fig7 = px.line(rnpsfig, title = 'Relationship NPS')
+fig7.update_layout(yaxis_title = '', xaxis_title = '', showlegend = False)
+fig7.update_yaxes(showline = True, linecolor = 'grey')
+fig7.update_xaxes(showline = True, linecolor = 'grey')
+fig7.update_traces(line_color = '#4D4D4D')
+fig7.update_xaxes(tickangle=0)
+
+
+
+
+
+###################Dropdowns##################
+
+dd1 = dcc.Dropdown(['Total','Premier','Personal Banking'],value = 'Total',id = 'propdd')
+
+
+
+###################################### Set up the app layout ####################################################
+
+
+app = dash.Dash(external_stylesheets=external_stylesheets)
+
+
+app.layout = html.Div([
+
+                    dbc.Row([
+                    dbc.Col(html.Img(src=app.get_asset_url('bank.png'),style = {'width':'50%'}, width = 1)),
+                    dbc.Col(html.H1('Bank "H" Customer Experience Exco Dashboard'), width = 8),
+                    dbc.Col(html.H6('Proposition selection:'),width = 1),
+                    dbc.Col(dd1, width = 2)
+
+                            ],
+                    style = {'margin-top': '7px', 'margin-left':'7px','margin-right':'7px'}),
+
+                    dbc.Row([
+                    dbc.Col(dbc.Card(card_content1, color = '#4D4D4D', inverse = True)),
+                    dbc.Col(dbc.Card(card_content2, color = '#9FA1A4')),
+                    dbc.Col(dbc.Card(card_content3, color = '#000000', inverse = True))
+
+                        ],
+                    style = {'margin-top': '15px', 'margin-left':'7px','margin-right':'7px'}
+                            ),
+                    dbc.Row([
+                        html.Hr()
+                                ],
+                        style = {'margin-top': '15px', 'margin-left':'7px','margin-right':'7px'}
+                                ),
+
+                    dbc.Tabs(children = [
+                        dbc.Tab( children = [
+
+                                dbc.Row([
+                                    dbc.Col(
+                                        [
+                                        dcc.Graph(id = 'ASA'),
+                                        dcc.Graph(id = 'att')
+                                        ],
+                                    width = 4
+                                    ),
+
+                                    dbc.Col([
+                                        dcc.Graph(id = 'ltb', figure = fig4),
+                                        dcc.Graph(id = 'rnps', figure = fig7)
+                                    ],
+                                    width = 4),
+
+                                    dbc.Col(
+                                        [html.H6('sNPS scores by market'),
+
+                                        dash_table.DataTable(id = 'sNPS'),
+                                        dcc.Graph(id = 'complaints')],
+                                        width = 4,
+                                        style = {'margin-top': '15px'}
+                                    )
+
+
+
+                                ])
+                        ], label = 'Global Trend'),
+                        dbc.Tab(
+                            children = [
+                                    dbc.Row([
+                                        dbc.Col(
+                                            [
+                                            dcc.Graph(id = 'ASA2'),
+                                            dcc.Graph(id = 'att2')
+                                            ],
+                                        width = 4
+                                        ),
+
+                                        dbc.Col([
+                                            dcc.Graph(id = 'ltb2'),
+                                            dcc.Graph(id = 'rnps2')
+                                        ],
+                                        width = 4),
+
+                                        dbc.Col(
+                                            [html.H6('sNPS scores by market'),
+
+                                            dash_table.DataTable(id = 'sNPS2'),
+
+                                            dcc.Graph(id = 'complaints2')],
+                                            width = 4,
+                                            style = {'margin-top': '15px'}
+                                        )
+
+                                    ])],
+                            label = 'Market Snapshot'
+                        )
+
+                    ], style = {'margin-left':'7px'})
+            ])
+
+
+
+#Call handling graph
+@app.callback(
+Output(component_id = 'ASA', component_property = 'figure'),
+Input(component_id = 'propdd', component_property = 'value')
+)
+
+def callhandlinggraph(input):
+        fig2 = go.Figure()
+        yasa = 'ASA'+str(input)
+        yaht = 'AHT'+str(input)
+        print(yasa)
+        print(yaht)
+        fig2.add_trace(go.Scatter(x = asa['Date'], y = asa[yaht], name = 'Average handling time (s)', marker = {'color':'grey'}))
+        fig2.add_trace(go.Bar(x = asa['Date'], y = asa[yasa], name = 'Average speed of answer (s)', marker = {'color':'black'}))
+        fig2.update_layout(yaxis_title = '', xaxis_title = '', title = 'Call handling metrics', legend = dict(orientation = 'h', y = -0.2))
+        fig2.update_yaxes(showline = True, linecolor = 'grey')
+        fig2.update_xaxes(showline = True, linecolor = 'grey')
+        fig2.update_xaxes(tickangle=0)
+        return fig2
+
+
+#Operations ATT graph callback
+@app.callback(
+Output(component_id = 'att', component_property = 'figure'),
+Input(component_id = 'propdd', component_property = 'value')
+)
+
+def attritiongraph(input):
+    fig5 = px.line(att, x = 'Date', y = input, title = 'Operations adherence to timelines')
+    fig5.update_layout(yaxis_title = '', xaxis_title = '')
+    fig5.update_yaxes(showline = True, linecolor = 'grey')
+    fig5.update_xaxes(showline = True, linecolor = 'grey')
+    fig5.update_traces(line_color = '#4D4D4D')
+    fig5.update_yaxes(range = [50,100])
+    fig5.update_xaxes(tickangle=0)
+    return fig5
+
+
+#sNPS graph callback
+@app.callback(
+Output(component_id = 'sNPS', component_property = 'data'),
+Input(component_id = 'propdd', component_property = 'value')
+)
+
+def sNPSgraph(input):
+    df1 = snps
+    df1 = df1[df1['Proposition'] == input]
+    df1 = df1.drop(columns = 'Proposition')
+    return df1.to_dict('records')
+
+
+
+#Complaints graph callback
+@app.callback(
+Output(component_id = 'complaints', component_property = 'figure'),
+Input(component_id = 'propdd', component_property = 'value')
+)
+
+def complaintsgraph(input):
+    fig3 = px.line(complaints, x = 'Date', y = input, title = 'Complaints / 100k customers')
+    fig3.update_layout(yaxis_title = '', xaxis_title = '')
+    fig3.update_yaxes(showline = True, linecolor = 'grey')
+    fig3.update_xaxes(showline = True, linecolor = 'grey')
+    fig3.update_traces(line_color = '#4D4D4D')
+    fig3.update_xaxes(tickangle=0)
+    return fig3
+
+
+
+#Call handling market graph callback
+@app.callback(
+Output(component_id = 'ASA2', component_property = 'figure'),
+Input(component_id = 'propdd', component_property = 'value')
+)
+
+def callhandlinggraphmarket(input):
+    asamarketfilt = asamarket[asamarket['Proposition'] == input]
+    fig9 = px.scatter(asamarketfilt, x = 'AHT', y = 'ASA', hover_data = ['Market'], title = 'Call handling metrics by market', color = 'AHT', color_continuous_scale=px.colors.sequential.Greys)
+    fig9.update_yaxes(showline = True, linecolor = 'grey')
+    fig9.update_xaxes(showline = True, linecolor = 'grey')
+    fig9.update_xaxes(tickangle=0)
+    fig9.update(layout_coloraxis_showscale = False)
+
+    return fig9
+
+
+
+#Ops aherence to timelines market graph callback
+@app.callback(
+Output(component_id = 'att2', component_property = 'figure'),
+Input(component_id = 'propdd', component_property = 'value')
+)
+
+def operationsgraphmarket(input):
+    attmarketfilt = attmarket[attmarket['Proposition'] == input].sort_values(by = 'ATT', ascending = False)
+    fig5 = px.bar(attmarketfilt, x = 'Market', y = 'ATT', title = 'Operations adherence to timelines by market')
+    fig5.update_layout(yaxis_title = '', xaxis_title = '')
+    fig5.update_yaxes(showline = True, linecolor = 'grey')
+    fig5.update_xaxes(showline = True, linecolor = 'grey')
+    fig5.update_traces(marker_color = 'black')
+    fig5.update_yaxes(range = [50,100])
+    fig5.update_xaxes(tickangle=0)
+    return fig5
+
+
+@app.callback(
+Output(component_id = 'ltb2', component_property = 'figure'),
+Input(component_id = 'propdd', component_property = 'value')
+)
+
+
+def leftthebankmarket(input):
+    ltbmarketfilt = ltbmarket[ltbmarket['Proposition'] == input].sort_values(by = 'LTB', ascending = False)
+    fig10 = px.bar(ltbmarketfilt, x = 'Market', y = 'LTB', title = 'Customer attrition by market')
+    fig10.update_yaxes(showline = True, linecolor = 'grey')
+    fig10.update_xaxes(showline = True, linecolor = 'grey')
+    fig10.update_traces(marker_color = 'black')
+    fig10.update_layout(yaxis_title = 'Number of customers', xaxis_title = '')
+    return fig10
+
+#sNPS graph callback market page
+@app.callback(
+Output(component_id = 'sNPS2', component_property = 'data'),
+Input(component_id = 'propdd', component_property = 'value')
+)
+
+def sNPSgraph2(input):
+    df1 = snps
+    df1 = df1[df1['Proposition'] == input]
+    df1 = df1.drop(columns = 'Proposition')
+    return df1.to_dict('records')
+
+@app.callback(
+Output(component_id = 'complaints2', component_property = 'figure'),
+Input(component_id = 'propdd', component_property = 'value')
+)
+
+def complaintsmarketgraph(input):
+    complaintsmarketfilt = complaintsmarket[complaintsmarket['Proposition'] == input].sort_values(by = 'CPK', ascending = False)
+    fig12 = px.bar(complaintsmarketfilt,x = 'Market', y = 'CPK', title = 'Complaints by market')
+    fig12.update_yaxes(showline = True, linecolor = 'grey')
+    fig12.update_xaxes(showline = True, linecolor = 'grey')
+    fig12.update_traces(marker_color = 'black')
+    fig12.update_layout(xaxis_title = '', yaxis_title = 'Complaints / 100k customers')
+    return fig12
+
+
+@app.callback(
+Output(component_id = 'rnps2', component_property = 'figure'),
+Input(component_id = 'propdd', component_property = 'value')
+)
+
+def rnpsmarketgraph(input):
+    rnpsfigmark = rnps.groupby(['Market','NPS category'])['Quarter'].count()
+    rnpsfigmark = rnpsfigmark.unstack(-1)
+    rnpsfigmark['Total'] = rnpsfigmark.sum(axis = 1)
+    rnpsfigmark['NPS score'] = (rnpsfigmark['Promoter']/rnpsfigmark['Total'] - rnpsfigmark['Detractor']/rnpsfigmark['Total'])*100
+    rnpsfigmark = rnpsfigmark['NPS score']
+    fig13 = px.bar(rnpsfigmark, title = 'rNPS by market')
+    fig13.update_traces(marker_color = 'black')
+    fig13.update_layout(showlegend = False)
+    return fig13
+
+
+
+if __name__ == '__main__':
+    app.run_server(port = 8165, debug=True)
